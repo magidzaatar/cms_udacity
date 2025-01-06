@@ -37,4 +37,13 @@ app.logger.setLevel(logging.INFO)
 app.logger.info("Flask app initialized successfully.")
 app.logger.info("Logging is set up.")
 
-import FlaskWebProject.views  # Import views after app initialization
+# Defer importing views until after app initialization to avoid circular imports
+from FlaskWebProject import views  # Import views here
+
+# Error handling to ensure critical env veriables, are present.
+if not app.config['SECRET_KEY']:
+    raise ValueError("No SECRET_KEY set for Flask application")
+
+#debug logs for extention intiallization
+app.logger.debug("SQLAlchemy initialized.")
+app.logger.debug("Flask-Login initialized.")
