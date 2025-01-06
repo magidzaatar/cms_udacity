@@ -57,6 +57,7 @@ class Post(db.Model):
     __tablename__ = 'posts'
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(150))
+    subtitle = db.Column(db.String(150))  # Optional subtitle field
     author = db.Column(db.String(75))
     body = db.Column(db.String(800))
     image_path = db.Column(db.String(100))
@@ -77,7 +78,13 @@ class Post(db.Model):
 
         if file:
             filename = secure_filename(file.filename)
-            file_extension = filename.rsplit('.', 1)[1]
+            file_extension = filename.rsplit('.', 1)[1].lower()
+
+            # Validate file type
+            if file_extension not in ['jpg', 'jpeg', 'png']:
+                flash("Invalid file format. Only .jpg and .png files are allowed.")
+                return
+
             random_filename = id_generator()
             filename = f"{random_filename}.{file_extension}"
 
@@ -91,13 +98,39 @@ class Post(db.Model):
                     old_blob_client = container_client.get_blob_client(self.image_path)
                     old_blob_client.delete_blob()
 
+                self.image_path = filename
+
             except Exception as e:
                 flash(f"An error occurred while uploading to Blob Storage: {str(e)}")
                 app.logger.error(f"Blob Storage Error: {str(e)}")
-
-            self.image_path = filename
-
+        
         # Add new post or update existing one
-        if new:
-            db.session.add(self)
-        db.session.commit()
+        try:
+            if new:
+                db.session.add(self)
+            db.session.commit()
+        
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"Database Error: {str(e)}")
+            flash("An error occurred while saving the post.")
+
+    def delete_post(self):
+        """
+        Delete a post along with its associated image from Azure Blob Storage.
+        """
+        try:
+            # Delete image from Blob Storage
+            if self.image_path:
+                blob_client = container_client.get_blob_client(self.image_path)
+                blob_client.delete_blob()
+
+            # Delete post from database
+            db.session.delete(self)
+            db.session.commit()
+            app.logger.info(f"Post {self.id} deleted successfully.")
+        
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"Error deleting post {self.id}: {str(e)}")
+            flash("An error occurred while deleting the post.")
