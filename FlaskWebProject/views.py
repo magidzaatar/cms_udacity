@@ -1,10 +1,10 @@
 """
-Routes and views for the flask application.
+Routes and views for the Flask application.
 """
 
 from datetime import datetime
 from flask import render_template, flash, redirect, request, session, url_for
-from werkzeug.urls import url_parse
+from urllib.parse import urlparse
 from config import Config
 from FlaskWebProject import app, db
 from FlaskWebProject.forms import LoginForm, PostForm
@@ -18,7 +18,8 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-imageSourceUrl = 'https://' + app.config['BLOB_ACCOUNT'] + '.blob.core.windows.net/' + app.config['BLOB_CONTAINER'] + '/'
+# URL for Blob Storage images
+imageSourceUrl = f"https://{app.config['BLOB_ACCOUNT']}.blob.core.windows.net/{app.config['BLOB_CONTAINER']}/"
 
 @app.route('/')
 @app.route('/home')
@@ -29,6 +30,7 @@ def home():
     """
     user = User.query.filter_by(username=current_user.username).first_or_404()
     posts = Post.query.all()
+    logger.info(f"User {current_user.username} accessed the home page.")
     return render_template(
         'index.html',
         title='Home Page',
@@ -44,10 +46,14 @@ def new_post():
     """
     form = PostForm(request.form)
     if form.validate_on_submit():
-        post = Post()
-        post.save_changes(form, request.files['image_path'], current_user.id, new=True)
-        logger.info(f"New post created by user {current_user.username}.")
-        return redirect(url_for('home'))
+        try:
+            post = Post()
+            post.save_changes(form, request.files['image_path'], current_user.id, new=True)
+            logger.info(f"New post created by user {current_user.username}.")
+            return redirect(url_for('home'))
+        except Exception as e:
+            logger.error(f"Error creating post: {str(e)}")
+            flash("An error occurred while creating the post.")
     return render_template(
         'post.html',
         title='Create Post',
@@ -62,11 +68,19 @@ def post(id):
     Edit an existing post.
     """
     post = Post.query.get(int(id))
+    if not post:
+        flash("Post not found.")
+        return redirect(url_for('home'))
+    
     form = PostForm(formdata=request.form, obj=post)
     if form.validate_on_submit():
-        post.save_changes(form, request.files['image_path'], current_user.id)
-        logger.info(f"Post {id} updated by user {current_user.username}.")
-        return redirect(url_for('home'))
+        try:
+            post.save_changes(form, request.files['image_path'], current_user.id)
+            logger.info(f"Post {id} updated by user {current_user.username}.")
+            return redirect(url_for('home'))
+        except Exception as e:
+            logger.error(f"Error updating post: {str(e)}")
+            flash("An error occurred while updating the post.")
     return render_template(
         'post.html',
         title='Edit Post',
@@ -96,7 +110,7 @@ def login():
         logger.info(f"User {user.username} logged in successfully.")
         
         next_page = request.args.get('next')
-        if not next_page or url_parse(next_page).netloc != '':
+        if not next_page or urlparse(next_page).netloc != '':
             next_page = url_for('home')
         
         return redirect(next_page)
@@ -136,12 +150,19 @@ def authorized():
         session["user"] = result.get("id_token_claims")
         
         # Log in as admin for this project (adjust as needed for multi-user support)
-        user = User.query.filter_by(username="admin").first()
+        user_email = session["user"]["preferred_username"]
+        user = User.query.filter_by(username=user_email).first()
+        
+        if not user:
+            user = User(username=user_email)
+            db.session.add(user)
+            db.session.commit()
+        
         login_user(user)
         
         _save_cache(cache)
         
-        logger.info("Microsoft user authenticated successfully.")
+        logger.info(f"Microsoft user {user_email} authenticated successfully.")
     
     return redirect(url_for('home'))
 
@@ -207,4 +228,3 @@ def _build_auth_url(authority=None, scopes=None, state=None):
         state=state,
         redirect_uri=url_for('authorized', _external=True)
 )
-
